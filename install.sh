@@ -6,20 +6,27 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build/ALCUBIERRE_artefacts/Release"
 
-VST3_SRC="$BUILD_DIR/VST3/ALCUBIERRE.vst3"
-AU_SRC="$BUILD_DIR/AU/ALCUBIERRE.component"
+# Prefer pre-built dist/ if present, otherwise fall back to build artefacts
+if [ -d "$SCRIPT_DIR/dist/ALCUBIERRE.vst3" ]; then
+    PLUGIN_DIR="$SCRIPT_DIR/dist"
+elif [ -d "$SCRIPT_DIR/build/ALCUBIERRE_artefacts/Release/VST3/ALCUBIERRE.vst3" ]; then
+    PLUGIN_DIR="$SCRIPT_DIR/build/ALCUBIERRE_artefacts/Release"
+    VST3_SRC="$PLUGIN_DIR/VST3/ALCUBIERRE.vst3"
+    AU_SRC="$PLUGIN_DIR/AU/ALCUBIERRE.component"
+else
+    echo "❌  No built plugins found."
+    echo "    Either clone with dist/ folder, or build first:"
+    echo "    cmake -B build -G 'Unix Makefiles' && cmake --build build --config Release"
+    exit 1
+fi
+
+# Normalise paths (dist/ has them flat)
+VST3_SRC="${VST3_SRC:-$PLUGIN_DIR/ALCUBIERRE.vst3}"
+AU_SRC="${AU_SRC:-$PLUGIN_DIR/ALCUBIERRE.component}"
 
 VST3_DEST="$HOME/Library/Audio/Plug-Ins/VST3"
 AU_DEST="$HOME/Library/Audio/Plug-Ins/Components"
-
-# ─── Check sources exist ──────────────────────────────────────────────────────
-if [ ! -d "$VST3_SRC" ] && [ ! -d "$AU_SRC" ]; then
-    echo "❌  No built plugins found in $BUILD_DIR"
-    echo "    Run: cmake -B build -G 'Unix Makefiles' && cmake --build build --config Release"
-    exit 1
-fi
 
 echo ""
 echo "  ╔═══════════════════════════════════════╗"
@@ -28,9 +35,7 @@ echo "  ║         Spacetime Warp Plugin          ║"
 echo "  ╚═══════════════════════════════════════╝"
 echo ""
 
-# ─── Create destination directories ──────────────────────────────────────────
-mkdir -p "$VST3_DEST"
-mkdir -p "$AU_DEST"
+mkdir -p "$VST3_DEST" "$AU_DEST"
 
 # ─── Install VST3 ────────────────────────────────────────────────────────────
 if [ -d "$VST3_SRC" ]; then
@@ -46,19 +51,12 @@ if [ -d "$AU_SRC" ]; then
     rm -rf "$AU_DEST/ALCUBIERRE.component"
     cp -R "$AU_SRC" "$AU_DEST/"
     echo "  ✓ ALCUBIERRE.component installed"
-
-    # Register with AudioComponentRegistrar so AU is immediately visible
-    if command -v auval &>/dev/null; then
-        echo "  → Registering AU with system cache ..."
-        killall -9 AudioComponentRegistrar 2>/dev/null || true
-        sleep 1
-        echo "  ✓ AU cache refreshed"
-    fi
+    killall -9 AudioComponentRegistrar 2>/dev/null || true
 fi
 
-# ─── Remove macOS quarantine flag (critical for Gatekeeper) ──────────────────
-echo "  → Clearing quarantine flags ..."
-xattr -dr com.apple.quarantine "$VST3_DEST/ALCUBIERRE.vst3" 2>/dev/null || true
+# ─── Clear Gatekeeper quarantine (required on macOS — no code signing) ───────
+echo "  → Clearing Gatekeeper quarantine ..."
+xattr -dr com.apple.quarantine "$VST3_DEST/ALCUBIERRE.vst3"   2>/dev/null || true
 xattr -dr com.apple.quarantine "$AU_DEST/ALCUBIERRE.component" 2>/dev/null || true
 echo "  ✓ Quarantine cleared"
 
@@ -66,9 +64,9 @@ echo ""
 echo "  ✅  ALCUBIERRE installed successfully!"
 echo ""
 echo "  In Ableton Live:"
-echo "    Preferences → Plug-Ins → VST3 Folder → scan"
-echo "    (or restart Ableton — it auto-scans ~/Library/Audio/Plug-Ins/VST3)"
+echo "    Restart Ableton (or Preferences → Plug-Ins → rescan VST3)"
+echo "    Find ALCUBIERRE in the plugin browser under effects"
 echo ""
-echo "  As AU (Logic / Garage Band):"
-echo "    Audio Units live in ~/Library/Audio/Plug-Ins/Components"
+echo "  In Logic Pro / GarageBand (AU):"
+echo "    Plugins are in ~/Library/Audio/Plug-Ins/Components"
 echo ""

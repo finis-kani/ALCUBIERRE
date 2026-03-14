@@ -1,2 +1,0 @@
-/Library/Developer/CommandLineTools/usr/bin/ar qc libAlcubiereResources.a CMakeFiles/AlcubiereResources.dir/juce_binarydata_AlcubiereResources/JuceLibraryCode/BinaryData1.cpp.o
-/Library/Developer/CommandLineTools/usr/bin/ranlib libAlcubiereResources.a

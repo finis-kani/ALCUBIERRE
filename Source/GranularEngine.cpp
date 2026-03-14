@@ -16,9 +16,11 @@ void GranularEngine::prepare(double sr, int /*maxBlockSize*/)
 
 // ─── Spawn one grain ──────────────────────────────────────────────────────────
 void GranularEngine::spawnGrain(const RingBuffer<float>& ringBuffer,
-                                 int   futureLength,
-                                 float x, float z, float alphaOmega,
-                                 double grainSizeSamples)
+                                 int    futureLength,
+                                 float  temporalDisplacement,
+                                 float  z, float futureBlend,
+                                 double grainSizeSamples,
+                                 float  vinylPitchMod)
 {
     // Find an inactive slot
     Grain* slot = nullptr;
@@ -31,10 +33,10 @@ void GranularEngine::spawnGrain(const RingBuffer<float>& ringBuffer,
     const double ringSize = (double)ringBuffer.getSize();
 
     // Decide whether this grain reads from future or past
-    const bool useFuture = (futureLength > 0) && (random.nextFloat() < alphaOmega);
+    const bool useFuture = (futureLength > 0) && (random.nextFloat() < futureBlend);
 
-    // Base temporal displacement in samples
-    const double baseOffset = (double)x * 10.0 * sampleRate;
+    // Base temporal displacement already in samples
+    const double baseOffset = (double)temporalDisplacement;
 
     // Scatter: random offset proportional to z and grain size
     const double scatter = ((double)random.nextFloat() - 0.5) * 2.0
@@ -47,7 +49,8 @@ void GranularEngine::spawnGrain(const RingBuffer<float>& ringBuffer,
     slot->phase         = 0.0;
     slot->sizeInSamples = grainSizeSamples;
     slot->amplitude     = 1.0f;
-    slot->playRate      = rateVariation;
+    slot->basePlayRate  = rateVariation;
+    slot->playRate      = rateVariation * (double)vinylPitchMod;
 
     if (useFuture)
     {
@@ -76,8 +79,11 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
                                    const RingBuffer<float>&   ringBuffer,
                                    const float* const*        futureData,
                                    int                        futureLength,
-                                   float x, float y, float z,
-                                   float alphaOmega, float grainSizeMs)
+                                   float temporalDisplacement,
+                                   float y, float z,
+                                   float futureBlend,
+                                   float grainSizeMs,
+                                   float vinylPitchMod)
 {
     output.clear();
 
@@ -95,6 +101,13 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
 
     const double ringSize = (double)ringBuffer.getSize();
 
+    // ── Apply vinyl pitch mod to all currently active grains ──────────────────
+    for (auto& grain : grains)
+    {
+        if (grain.active)
+            grain.playRate = grain.basePlayRate * (double)vinylPitchMod;
+    }
+
     for (int i = 0; i < numSamples; ++i)
     {
         // ── Grain scheduling ────────────────────────────────────────────────
@@ -102,7 +115,8 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
         if (timeSinceLastGrain >= interGrainInterval)
         {
             timeSinceLastGrain -= interGrainInterval;
-            spawnGrain(ringBuffer, futureLength, x, z, alphaOmega, grainSizeSamples);
+            spawnGrain(ringBuffer, futureLength, temporalDisplacement,
+                       z, futureBlend, grainSizeSamples, vinylPitchMod);
         }
 
         // ── Sum active grains ────────────────────────────────────────────────
@@ -119,7 +133,7 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
             {
                 for (int ch = 0; ch < numChannels; ++ch)
                 {
-                    const int fch = ch % 2;   // future buffer is up to 2 channels
+                    const int fch = ch % 2;
                     int   fi0 = (int)grain.futureReadPos;
                     int   fi1 = fi0 + 1;
                     fi0 = juce::jlimit(0, futureLength - 1, fi0);
@@ -131,7 +145,7 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
                 }
                 grain.futureReadPos += grain.playRate;
                 if (grain.futureReadPos >= (double)(futureLength - 1))
-                    grain.futureReadPos = 0.0;  // loop the future buffer
+                    grain.futureReadPos = 0.0;
             }
             else
             {
@@ -140,7 +154,6 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
                     const float s = (float)ringBuffer.readAtAbsolutePosition(ch, grain.absoluteReadPos);
                     output.addSample(ch, i, s * amp);
                 }
-                // Advance absolute read position
                 grain.absoluteReadPos += grain.playRate;
                 if (grain.absoluteReadPos >= ringSize) grain.absoluteReadPos -= ringSize;
                 if (grain.absoluteReadPos < 0.0)       grain.absoluteReadPos += ringSize;

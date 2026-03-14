@@ -10,15 +10,13 @@ void LinearPredictor::train(const float* data, int length)
     trained = false;
     if (length < ORDER + 1) return;
 
-    // ── Autocorrelation lags 0..ORDER ──────────────────────────────────────────
     double r[ORDER + 1] = {};
     for (int lag = 0; lag <= ORDER; ++lag)
         for (int i = lag; i < length; ++i)
             r[lag] += (double)data[i] * (double)data[i - lag];
 
-    if (r[0] < 1e-12) return;  // silence — don't update coefficients
+    if (r[0] < 1e-12) return;
 
-    // ── Levinson-Durbin recursion ──────────────────────────────────────────────
     double a[ORDER]    = {};
     double aTmp[ORDER] = {};
     double e = r[0];
@@ -30,7 +28,6 @@ void LinearPredictor::train(const float* data, int length)
             lambda -= a[j] * r[i - j];
         lambda /= e;
 
-        // Stability check
         if (std::abs(lambda) >= 1.0) lambda *= 0.99 / std::abs(lambda);
 
         for (int j = 0; j < i; ++j)
@@ -59,7 +56,6 @@ void LinearPredictor::generateFuture(const float* history, int histLen,
         return;
     }
 
-    // Scratch buffer: [history tail | predicted future]
     std::vector<float> buf(history, history + histLen);
 
     for (int i = 0; i < futureLength; ++i)
@@ -69,7 +65,6 @@ void LinearPredictor::generateFuture(const float* history, int histLen,
         for (int j = 0; j < ORDER; ++j)
             pred += coeffs[j] * buf[sz - 1 - j];
 
-        // Soft-clip to prevent explosion
         pred = juce::jlimit(-1.0f, 1.0f, pred);
         future[i] = pred;
         buf.push_back(pred);
@@ -77,7 +72,7 @@ void LinearPredictor::generateFuture(const float* history, int histLen,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AlcubierreProcessor
+// Parameter layout
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
@@ -86,10 +81,11 @@ static juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     auto pct = [](float v, int) { return juce::String(v, 2); };
 
+    // ── TIME: unified temporal position (-1=full past, 0=present, +1=full future)
     layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID { "temporal_displacement", 1 },
-        "X — Temporal Displacement",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f,
+        juce::ParameterID { "time_position", 1 },
+        "TIME — Temporal Position",
+        juce::NormalisableRange<float>(-1.0f, 1.0f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction(pct)));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
@@ -101,12 +97,6 @@ static juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "dimensional_scatter", 1 },
         "Z — Dimensional Scatter",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f,
-        juce::AudioParameterFloatAttributes().withStringFromValueFunction(pct)));
-
-    layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID { "alpha_omega", 1 },
-        "ALPHAOMEGA — Future Inference",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction(pct)));
 
@@ -123,14 +113,19 @@ static juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         juce::NormalisableRange<float>(0.0f, 0.99f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction(pct)));
 
+    // ── DELTA: dry/wet mix (was "mix")
     layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID { "mix", 1 },
-        "Mix",
+        juce::ParameterID { "delta", 1 },
+        "DELTA — Mix",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 1.0f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction(pct)));
 
     return layout;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AlcubierreProcessor
+// ═══════════════════════════════════════════════════════════════════════════════
 
 AlcubierreProcessor::AlcubierreProcessor()
     : AudioProcessor(BusesProperties()
@@ -151,7 +146,6 @@ AlcubierreProcessor::~AlcubierreProcessor() = default;
 // ─── Bus layout ───────────────────────────────────────────────────────────────
 bool AlcubierreProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
-    // Accept mono or stereo in/out if they match.
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
         layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
@@ -185,6 +179,31 @@ void AlcubierreProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         std::fill(futureData[ch].begin(), futureData[ch].end(), 0.0f);
         std::fill(lpcTrainBuf[ch].begin(), lpcTrainBuf[ch].end(), 0.0f);
     }
+
+    // ── Initialise parameter smoothers ────────────────────────────────────────
+    const double rampSec = 0.03;  // 30 ms
+    timeSmoothed    .reset(sampleRate, rampSec);
+    ySmoothed       .reset(sampleRate, rampSec);
+    zSmoothed       .reset(sampleRate, rampSec);
+    grainSmoothed   .reset(sampleRate, rampSec);
+    feedbackSmoothed.reset(sampleRate, rampSec);
+    deltaSmoothed   .reset(sampleRate, rampSec);
+
+    vinylPitchSmoothed.reset(sampleRate, 0.015);  // 15 ms vinyl ramp
+    gainCompSmoothed  .reset(sampleRate, 0.20);   // 200 ms gain smoothing
+
+    // Seed smoothers with current parameter values
+    timeSmoothed    .setCurrentAndTargetValue(apvts.getRawParameterValue("time_position")->load());
+    ySmoothed       .setCurrentAndTargetValue(apvts.getRawParameterValue("warp_density")->load());
+    zSmoothed       .setCurrentAndTargetValue(apvts.getRawParameterValue("dimensional_scatter")->load());
+    grainSmoothed   .setCurrentAndTargetValue(apvts.getRawParameterValue("grain_size_ms")->load());
+    feedbackSmoothed.setCurrentAndTargetValue(apvts.getRawParameterValue("feedback")->load());
+    deltaSmoothed   .setCurrentAndTargetValue(apvts.getRawParameterValue("delta")->load());
+    vinylPitchSmoothed.setCurrentAndTargetValue(1.0f);
+    gainCompSmoothed  .setCurrentAndTargetValue(1.0f);
+
+    dryRmsEnv = 0.0f;
+    wetRmsEnv = 0.0f;
 }
 
 void AlcubierreProcessor::releaseResources() {}
@@ -192,13 +211,12 @@ void AlcubierreProcessor::releaseResources() {}
 // ─── Future buffer update ─────────────────────────────────────────────────────
 void AlcubierreProcessor::updateFutureBuffer(int numChannels)
 {
-    const int ringLen   = ringBuffer.getSize();
-    const int trainLen  = juce::jmin(LPC_TRAIN_LENGTH, ringLen);
-    const int wp        = ringBuffer.getWritePosition();
+    const int ringLen  = ringBuffer.getSize();
+    const int trainLen = juce::jmin(LPC_TRAIN_LENGTH, ringLen);
+    const int wp       = ringBuffer.getWritePosition();
 
     for (int ch = 0; ch < juce::jmin(numChannels, MAX_CHANNELS); ++ch)
     {
-        // Collect training samples from ring buffer (most recent `trainLen` samples)
         for (int i = 0; i < trainLen; ++i)
         {
             const int pos = ((wp - trainLen + i) + ringLen * 2) % ringLen;
@@ -206,16 +224,12 @@ void AlcubierreProcessor::updateFutureBuffer(int numChannels)
         }
 
         predictors[ch].train(lpcTrainBuf[ch].data(), trainLen);
-
         predictors[ch].generateFuture(lpcTrainBuf[ch].data(), trainLen,
                                        futureData[ch].data(), FUTURE_BUFFER_LENGTH);
     }
 
-    // Mirror channel 0 to channel 1 if mono
     if (numChannels == 1)
-    {
         std::copy(futureData[0].begin(), futureData[0].end(), futureData[1].begin());
-    }
 }
 
 // ─── processBlock ─────────────────────────────────────────────────────────────
@@ -229,18 +243,52 @@ void AlcubierreProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     const int numSamples= buffer.getNumSamples();
     const int numCh     = std::min({ totalIn, totalOut, MAX_CHANNELS });
 
-    // Clear any extra output channels we won't fill
     for (int ch = numCh; ch < totalOut; ++ch)
         buffer.clear(ch, 0, numSamples);
 
-    // ── Read parameters ────────────────────────────────────────────────────────
-    const float x          = apvts.getRawParameterValue("temporal_displacement")->load();
-    const float y          = apvts.getRawParameterValue("warp_density")->load();
-    const float z          = apvts.getRawParameterValue("dimensional_scatter")->load();
-    const float ao         = apvts.getRawParameterValue("alpha_omega")->load();
-    const float grainSizeMs= apvts.getRawParameterValue("grain_size_ms")->load();
-    const float feedback   = apvts.getRawParameterValue("feedback")->load();
-    const float mix        = apvts.getRawParameterValue("mix")->load();
+    // ── Advance parameter smoothers ───────────────────────────────────────────
+    timeSmoothed    .setTargetValue(apvts.getRawParameterValue("time_position")->load());
+    ySmoothed       .setTargetValue(apvts.getRawParameterValue("warp_density")->load());
+    zSmoothed       .setTargetValue(apvts.getRawParameterValue("dimensional_scatter")->load());
+    grainSmoothed   .setTargetValue(apvts.getRawParameterValue("grain_size_ms")->load());
+    feedbackSmoothed.setTargetValue(apvts.getRawParameterValue("feedback")->load());
+    deltaSmoothed   .setTargetValue(apvts.getRawParameterValue("delta")->load());
+
+    const float timePrev  = timeSmoothed.getCurrentValue();
+    const float timePos   = timeSmoothed.skip(numSamples);
+    const float y         = ySmoothed.skip(numSamples);
+    const float z         = zSmoothed.skip(numSamples);
+    const float grainSizeMs = grainSmoothed.skip(numSamples);
+    const float feedback  = feedbackSmoothed.skip(numSamples);
+    const float delta     = deltaSmoothed.skip(numSamples);
+
+    // ── Derive temporal displacement and future blend from TIME ───────────────
+    // time_position in [-1, +1]:
+    //   negative → past:   displacement = |time_position| * 10s * sampleRate
+    //   positive → future: futureBlend  =  time_position
+    const float temporalDisplacement = juce::jmax(0.0f, -timePos) * 10.0f * (float)currentSampleRate;
+    const float futureBlend          = juce::jmax(0.0f,  timePos);
+
+    // ── Vinyl / Doppler pitch modulation ──────────────────────────────────────
+    // Rate of change of time_position per block → pitch shift
+    // Moving toward past (delta < 0): pitch down; toward future: pitch up
+    const float timeDelta = timePos - timePrev;  // change over this block
+    const float vinylTarget = juce::jlimit(0.25f, 3.0f, 1.0f + timeDelta * 1.0f);
+    vinylPitchSmoothed.setTargetValue(vinylTarget);
+    const float vinylPitch = vinylPitchSmoothed.skip(numSamples);
+
+    // ── Measure dry RMS (100ms exponential window) ────────────────────────────
+    float dryRmsSq = 0.0f;
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        const float* src = buffer.getReadPointer(ch);
+        for (int i = 0; i < numSamples; ++i)
+            dryRmsSq += src[i] * src[i];
+    }
+    dryRmsSq /= (float)(numSamples * numCh);
+
+    const float rmsCoeff = std::exp(-(float)numSamples / ((float)currentSampleRate * 0.1f));
+    dryRmsEnv = dryRmsEnv * rmsCoeff + dryRmsSq * (1.0f - rmsCoeff);
 
     // ── Build ring-buffer write signal: dry input + feedback ──────────────────
     for (int ch = 0; ch < numCh; ++ch)
@@ -257,7 +305,6 @@ void AlcubierreProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         const float* ptrs[MAX_CHANNELS];
         for (int ch = 0; ch < numCh; ++ch)
             ptrs[ch] = writeInputBuffer.getReadPointer(ch);
-        // Fill any unused channels by mirroring ch 0
         for (int ch = numCh; ch < MAX_CHANNELS; ++ch)
             ptrs[ch] = ptrs[0];
         ringBuffer.write(ptrs, MAX_CHANNELS, numSamples);
@@ -272,20 +319,48 @@ void AlcubierreProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     }
 
     // ── Granular synthesis ────────────────────────────────────────────────────
-    // Resize wet buffer if needed (no alloc — setSize with keepExisting = false)
     if (wetBuffer.getNumSamples() < numSamples)
         wetBuffer.setSize(MAX_CHANNELS, numSamples, false, true, true);
 
     {
-        // Create a sub-buffer view of the right number of channels and samples
         juce::AudioBuffer<float> wetOut(wetBuffer.getArrayOfWritePointers(),
                                          numCh, numSamples);
+
         granularEngine.processBlock(wetOut, ringBuffer,
                                      futurePtrs.data(), FUTURE_BUFFER_LENGTH,
-                                     x, y, z, ao, grainSizeMs);
+                                     temporalDisplacement, y, z,
+                                     futureBlend, grainSizeMs, vinylPitch);
 
         // ── Glitch engine ──────────────────────────────────────────────────────
         glitchEngine.process(wetOut, z);
+
+        // ── Measure wet RMS for gain compensation ─────────────────────────────
+        float wetRmsSq = 0.0f;
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const float* src = wetOut.getReadPointer(ch);
+            for (int i = 0; i < numSamples; ++i)
+                wetRmsSq += src[i] * src[i];
+        }
+        wetRmsSq /= (float)(numSamples * numCh);
+        wetRmsEnv = wetRmsEnv * rmsCoeff + wetRmsSq * (1.0f - rmsCoeff);
+
+        // Target gain: match wet level to dry (cap +12 dB = ×4)
+        const float wetRms = std::sqrt(juce::jmax(wetRmsEnv, 1e-10f));
+        const float dryRms = std::sqrt(juce::jmax(dryRmsEnv, 1e-10f));
+        const float targetGain = (wetRms > 1e-6f)
+            ? juce::jlimit(0.1f, 4.0f, dryRms / wetRms)
+            : 1.0f;
+        gainCompSmoothed.setTargetValue(targetGain);
+        const float gainComp = gainCompSmoothed.skip(numSamples);
+
+        // Apply gain compensation to wet signal
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            float* w = wetOut.getWritePointer(ch);
+            for (int i = 0; i < numSamples; ++i)
+                w[i] *= gainComp;
+        }
 
         // ── Save feedback ──────────────────────────────────────────────────────
         if (feedbackBuffer.getNumSamples() < numSamples)
@@ -294,13 +369,13 @@ void AlcubierreProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         for (int ch = 0; ch < numCh; ++ch)
             feedbackBuffer.copyFrom(ch, 0, wetOut, ch, 0, numSamples);
 
-        // ── Dry/Wet mix to output ──────────────────────────────────────────────
+        // ── Dry/Wet mix to output (DELTA) ─────────────────────────────────────
         for (int ch = 0; ch < numCh; ++ch)
         {
             float*       out = buffer.getWritePointer(ch);
             const float* wet = wetOut.getReadPointer(ch);
             for (int i = 0; i < numSamples; ++i)
-                out[i] = out[i] * (1.0f - mix) + wet[i] * mix;
+                out[i] = out[i] * (1.0f - delta) + wet[i] * delta;
         }
     }
 }

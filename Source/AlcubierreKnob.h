@@ -3,10 +3,9 @@
 #include <JuceHeader.h>
 
 // ─── AlcubierreKnob ───────────────────────────────────────────────────────────
-// Rotary slider rendered as a glowing LED dot overlaid on the background image.
-// Inherits juce::Slider so it can be passed directly to SliderAttachment.
-// paint() is fully overridden — no LookAndFeel drawing occurs.
-class AlcubierreKnob : public juce::Slider
+// Rotary slider rendered as a glowing LED dot with subtle per-knob flicker.
+// Inherits juce::Slider (for SliderAttachment) and juce::Timer (for flicker).
+class AlcubierreKnob : public juce::Slider, private juce::Timer
 {
 public:
     AlcubierreKnob(const juce::String& labelText, juce::Colour colour)
@@ -15,9 +14,19 @@ public:
         setSliderStyle(juce::Slider::Rotary);
         setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
         setDoubleClickReturnValue(true, 0.5);
+
+        // Randomise per-knob flicker phase so they drift apart visually
+        flickerPhase = juce::Random::getSystemRandom().nextFloat()
+                     * juce::MathConstants<float>::twoPi;
+        flickerRate  = 0.18f
+                     + (juce::Random::getSystemRandom().nextFloat() - 0.5f) * 0.04f;
+
+        startTimerHz(20);
     }
 
-    // Kept for backward-compat with SliderAttachment construction in PluginEditor.
+    ~AlcubierreKnob() override { stopTimer(); }
+
+    // Kept for backward-compat with SliderAttachment construction.
     juce::Slider& getSlider() { return *this; }
 
     void paint(juce::Graphics& g) override
@@ -27,26 +36,33 @@ public:
         const float cx = w * 0.5f;
         const float cy = h * 0.5f;
 
-        // Normalise value 0..1
         const float value = (float)juce::jmap(getValue(),
                                                getMinimum(), getMaximum(),
                                                0.0, 1.0);
 
         const float baseDotRadius = 8.0f;
-        const float glowMaxRadius = 27.0f; // full glow extent at value=1
+        const float glowMaxRadius = 27.0f;
 
-        // ── Glow halo (outer to inner, semi-transparent rings) ────────────────
+        // Flicker: gentle breath + harmonic shimmer
+        const float flickerAlpha = 1.0f
+                                 + 0.06f * std::sin(flickerPhase)
+                                 + 0.03f * std::sin(flickerPhase * 2.73f);
+
+        // ── Glow halo ─────────────────────────────────────────────────────────
         for (int i = 5; i >= 1; --i)
         {
             const float radius = baseDotRadius
                                + (float)i * (glowMaxRadius / 5.0f) * value;
-            const float alpha  = (0.15f * value) / (float)i;
-            g.setColour(ledColour.withAlpha(juce::jlimit(0.0f, 1.0f, alpha)));
+            const float alpha  = juce::jlimit(0.0f, 1.0f,
+                (0.15f * value) / (float)i * flickerAlpha);
+            g.setColour(ledColour.withAlpha(alpha));
             g.fillEllipse(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f);
         }
 
         // ── Core LED dot ──────────────────────────────────────────────────────
-        g.setColour(ledColour.withAlpha(0.3f + 0.7f * value));
+        const float coreAlpha = juce::jlimit(0.0f, 1.0f,
+            (0.3f + 0.7f * value) * flickerAlpha);
+        g.setColour(ledColour.withAlpha(coreAlpha));
         g.fillEllipse(cx - baseDotRadius, cy - baseDotRadius,
                       baseDotRadius * 2.0f, baseDotRadius * 2.0f);
 
@@ -56,7 +72,6 @@ public:
         const float arcAngle  = rotStart + value * (rotEnd - rotStart);
         const float arcRadius = baseDotRadius + 6.0f;
 
-        // Background track
         {
             juce::Path track;
             track.addCentredArc(cx, cy, arcRadius, arcRadius,
@@ -65,7 +80,6 @@ public:
             g.strokePath(track, juce::PathStrokeType(1.5f));
         }
 
-        // Filled portion
         if (value > 0.01f)
         {
             juce::Path arc;
@@ -96,8 +110,18 @@ public:
     }
 
 private:
+    void timerCallback() override
+    {
+        flickerPhase += flickerRate;
+        if (flickerPhase > juce::MathConstants<float>::twoPi * 100.0f)
+            flickerPhase -= juce::MathConstants<float>::twoPi * 100.0f;
+        repaint();
+    }
+
     juce::String ledLabel;
     juce::Colour ledColour;
+    float flickerPhase = 0.0f;
+    float flickerRate  = 0.18f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AlcubierreKnob)
 };

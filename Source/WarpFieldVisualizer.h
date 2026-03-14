@@ -44,7 +44,7 @@ public:
         const uint8_t lineAlpha = (uint8_t)(juce::jlimit(0.0f, 1.0f, (x + mix) * 0.5f) * 28.0f);
         if (lineAlpha > 0)
         {
-            g.setColour(juce::Colour(255, 255, 255, lineAlpha));
+            g.setColour(juce::Colour((uint8_t)255, (uint8_t)255, (uint8_t)255, lineAlpha));
 
             const int numLines = 48;
             const float twoPi  = juce::MathConstants<float>::twoPi;
@@ -86,7 +86,7 @@ public:
 
             if (ringAlpha < 2) continue;
 
-            g.setColour(juce::Colour(255, 255, 255, ringAlpha));
+            g.setColour(juce::Colour((uint8_t)255, (uint8_t)255, (uint8_t)255, ringAlpha));
             const float r = baseR + warp;
             g.drawEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f, 0.5f);
         }
@@ -99,11 +99,11 @@ public:
         if (dotAlpha > 0)
         {
             // Outer glow
-            g.setColour(juce::Colour(0, 255, 255, (uint8_t)(dotAlpha / 4)));
+            g.setColour(juce::Colour((uint8_t)0, (uint8_t)255, (uint8_t)255, (uint8_t)(dotAlpha / 4)));
             g.fillEllipse(cx - dotRadius * 2.0f, cy - dotRadius * 2.0f,
                           dotRadius * 4.0f, dotRadius * 4.0f);
             // Core
-            g.setColour(juce::Colour(0, 255, 255, dotAlpha));
+            g.setColour(juce::Colour((uint8_t)0, (uint8_t)255, (uint8_t)255, dotAlpha));
             g.fillEllipse(cx - dotRadius, cy - dotRadius,
                           dotRadius * 2.0f, dotRadius * 2.0f);
         }

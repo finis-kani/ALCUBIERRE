@@ -84,7 +84,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
-    auto pct = [](float v) { return juce::String(v, 2); };
+    auto pct = [](float v, int) { return juce::String(v, 2); };
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "temporal_displacement", 1 },
@@ -227,7 +227,7 @@ void AlcubierreProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     const int totalIn   = getTotalNumInputChannels();
     const int totalOut  = getTotalNumOutputChannels();
     const int numSamples= buffer.getNumSamples();
-    const int numCh     = juce::jmin({ totalIn, totalOut, MAX_CHANNELS });
+    const int numCh     = std::min({ totalIn, totalOut, MAX_CHANNELS });
 
     // Clear any extra output channels we won't fill
     for (int ch = numCh; ch < totalOut; ++ch)

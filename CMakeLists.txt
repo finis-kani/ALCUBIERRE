@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ─── Fetch JUCE 7.0.9 ─────────────────────────────────────────────────────────
 include(FetchContent)
 
-set(JUCE_TAG 7.0.9)
+set(JUCE_TAG 8.0.7)
 
 FetchContent_Declare(
     JUCE

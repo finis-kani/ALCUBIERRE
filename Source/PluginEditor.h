@@ -107,7 +107,7 @@ public:
 };
 
 // ─── AlcubierreEditor ─────────────────────────────────────────────────────────
-// 700 × 770 px portrait window.
+// 700 × 790 px portrait window.
 class AlcubierreEditor : public juce::AudioProcessorEditor,
                           private juce::Timer
 {
@@ -143,9 +143,6 @@ private:
     juce::AudioProcessorValueTreeState::SliderAttachment attTime;
     juce::AudioProcessorValueTreeState::SliderAttachment attY, attZ;
     juce::AudioProcessorValueTreeState::SliderAttachment attGrainSize, attFeedback, attDelta;
-
-    // ── Background image ──────────────────────────────────────────────────────
-    juce::Image bgImage;
 
     // ── NOW ramp state ────────────────────────────────────────────────────────
     bool  nowRampActive      = false;

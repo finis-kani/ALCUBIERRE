@@ -39,7 +39,7 @@ public:
     //   z                       — scatter / randomness
     //   futureBlend             — future vs past blend (0=past only, 1=future only)
     //   grainSizeMs             — grain size in milliseconds
-    //   vinylPitchMod           — pitch multiplier from doppler warp (1.0 = neutral)
+    //   tapePlayRate            — playback rate from TIME position (1.0 = normal speed)
     void processBlock(juce::AudioBuffer<float>&  output,
                       const RingBuffer<float>&   ringBuffer,
                       const float* const*        futureData,
@@ -48,7 +48,7 @@ public:
                       float y, float z,
                       float futureBlend,
                       float grainSizeMs,
-                      float vinylPitchMod = 1.0f);
+                      float tapePlayRate = 1.0f);
 
 private:
     void spawnGrain(const RingBuffer<float>& ringBuffer,
@@ -56,7 +56,7 @@ private:
                     float  temporalDisplacement,
                     float  z, float futureBlend,
                     double grainSizeSamples,
-                    float  vinylPitchMod);
+                    float  tapePlayRate);
 
     Grain  grains[MAX_GRAINS];
     double sampleRate         = 44100.0;

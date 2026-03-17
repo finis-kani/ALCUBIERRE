@@ -11,7 +11,7 @@
 class LinearPredictor
 {
 public:
-    static constexpr int ORDER = 8;
+    static constexpr int ORDER = 24;
 
     void train(const float* data, int length);
     void generateFuture(const float* history, int histLen,
@@ -70,9 +70,9 @@ private:
 
     // ── Future buffer ─────────────────────────────────────────────────────────
     static constexpr int MAX_CHANNELS           = 2;
-    static constexpr int FUTURE_BUFFER_LENGTH   = 4096;
-    static constexpr int FUTURE_UPDATE_INTERVAL = 2048;
-    static constexpr int LPC_TRAIN_LENGTH       = 2048;
+    static constexpr int FUTURE_BUFFER_LENGTH   = 16384;
+    static constexpr int FUTURE_UPDATE_INTERVAL = 4096;
+    static constexpr int LPC_TRAIN_LENGTH       = 8192;
 
     std::array<std::vector<float>, MAX_CHANNELS> futureData;
     std::array<const float*, MAX_CHANNELS>       futurePtrs;

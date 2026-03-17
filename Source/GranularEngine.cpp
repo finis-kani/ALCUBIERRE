@@ -20,7 +20,7 @@ void GranularEngine::spawnGrain(const RingBuffer<float>& ringBuffer,
                                  float  temporalDisplacement,
                                  float  z, float futureBlend,
                                  double grainSizeSamples,
-                                 float  vinylPitchMod)
+                                 float  tapePlayRate)
 {
     // Find an inactive slot
     Grain* slot = nullptr;
@@ -50,7 +50,7 @@ void GranularEngine::spawnGrain(const RingBuffer<float>& ringBuffer,
     slot->sizeInSamples = grainSizeSamples;
     slot->amplitude     = 1.0f;
     slot->basePlayRate  = rateVariation;
-    slot->playRate      = rateVariation * (double)vinylPitchMod;
+    slot->playRate      = rateVariation * (double)tapePlayRate;
 
     if (useFuture)
     {
@@ -83,7 +83,7 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
                                    float y, float z,
                                    float futureBlend,
                                    float grainSizeMs,
-                                   float vinylPitchMod)
+                                   float tapePlayRate)
 {
     output.clear();
 
@@ -105,7 +105,7 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
     for (auto& grain : grains)
     {
         if (grain.active)
-            grain.playRate = grain.basePlayRate * (double)vinylPitchMod;
+            grain.playRate = grain.basePlayRate * (double)tapePlayRate;
     }
 
     for (int i = 0; i < numSamples; ++i)
@@ -116,7 +116,7 @@ void GranularEngine::processBlock(juce::AudioBuffer<float>&  output,
         {
             timeSinceLastGrain -= interGrainInterval;
             spawnGrain(ringBuffer, futureLength, temporalDisplacement,
-                       z, futureBlend, grainSizeSamples, vinylPitchMod);
+                       z, futureBlend, grainSizeSamples, tapePlayRate);
         }
 
         // ── Sum active grains ────────────────────────────────────────────────

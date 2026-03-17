@@ -42,6 +42,41 @@ public:
 
         const float baseDotRadius = 8.0f;
         const float glowMaxRadius = 27.0f;
+        const float wellRadius = w * 0.5f - 4.0f;
+
+        // ── Recessed knob well ────────────────────────────────────────────────
+        // Dark fill
+        g.setColour(juce::Colour(0xff131313));
+        g.fillEllipse(cx - wellRadius, cy - wellRadius,
+                      wellRadius * 2.0f, wellRadius * 2.0f);
+        // 3 inner concentric rings
+        const float ringRadii[3]    = { wellRadius - 4.0f, wellRadius - 9.0f, wellRadius - 16.0f };
+        const juce::Colour ringCols[3] = {
+            juce::Colour(0xff1A1A1A),
+            juce::Colour(0xff222222),
+            juce::Colour(0xff2A2A2A)
+        };
+        for (int ri = 0; ri < 3; ++ri)
+        {
+            const float rr = ringRadii[ri];
+            if (rr <= 0.0f) continue;
+            g.setColour(ringCols[ri]);
+            g.drawEllipse(cx - rr, cy - rr, rr * 2.0f, rr * 2.0f, 1.0f);
+        }
+        // 16 tick marks around outer rim
+        {
+            const float tickOuter = wellRadius + 3.0f;
+            const float tickInner = tickOuter - 4.0f;
+            g.setColour(juce::Colour(0xff3A3A3A));
+            for (int ti = 0; ti < 16; ++ti)
+            {
+                const float angle = (float)ti / 16.0f * juce::MathConstants<float>::twoPi;
+                const float cosA  = std::cos(angle);
+                const float sinA  = std::sin(angle);
+                g.drawLine(cx + cosA * tickInner, cy + sinA * tickInner,
+                           cx + cosA * tickOuter, cy + sinA * tickOuter, 1.0f);
+            }
+        }
 
         // Flicker: gentle breath + harmonic shimmer
         const float flickerAlpha = 1.0f

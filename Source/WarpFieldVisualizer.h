@@ -6,7 +6,7 @@
 
 // ─── WarpFieldVisualizer ──────────────────────────────────────────────────────
 // Animated radial "warp field" drawn behind the knobs.
-// Reacts to X (temporal displacement) parameter.
+// Reacts to X (temporal displacement) and pitch parameters.
 // All drawing is opaque to its own bounds; caller should ensure it sits behind
 // the knob layer.
 class WarpFieldVisualizer : public juce::Component,
@@ -25,9 +25,11 @@ public:
     }
 
     // Called from GUI thread (parameter change callback).
-    void setXParam(float x)   { xParam.store(x,   std::memory_order_relaxed); }
-    void setZParam(float z)   { zParam.store(z,   std::memory_order_relaxed); }
-    void setMixParam(float m) { mixParam.store(m, std::memory_order_relaxed); }
+    void setXParam(float x)     { xParam.store(x,   std::memory_order_relaxed); }
+    void setZParam(float z)     { zParam.store(z,   std::memory_order_relaxed); }
+    void setMixParam(float m)   { mixParam.store(m, std::memory_order_relaxed); }
+    // pitchParam = tapePlayRate - 1.0  (0 at PRESENT, ±positive elsewhere)
+    void setPitchParam(float p) { pitchParam.store(p, std::memory_order_relaxed); }
 
     void paint(juce::Graphics& g) override
     {
@@ -40,8 +42,8 @@ public:
         const float maxR = std::sqrt(cx * cx + cy * cy) + 50.0f;
 
         // ── Radial warp lines ────────────────────────────────────────────────
-        // Alpha is proportional to x and mix
-        const uint8_t lineAlpha = (uint8_t)(juce::jlimit(0.0f, 1.0f, (x + mix) * 0.5f) * 28.0f);
+        // Alpha reduced 60%: max 28 → 10
+        const uint8_t lineAlpha = (uint8_t)(juce::jlimit(0.0f, 1.0f, (x + mix) * 0.5f) * 10.0f);
         if (lineAlpha > 0)
         {
             g.setColour(juce::Colour((uint8_t)255, (uint8_t)255, (uint8_t)255, lineAlpha));
@@ -75,6 +77,7 @@ public:
         }
 
         // ── Concentric rings ──────────────────────────────────────────────────
+        // ringAlpha max reduced 60%: 40 → 16
         const int numRings = 6;
         for (int ri = 1; ri <= numRings; ++ri)
         {
@@ -82,7 +85,7 @@ public:
             const float baseR = t * std::min(cx, cy) * 0.88f;
             const float warp  = x * 6.0f * std::sin(animPhase * 0.9f + t * 4.0f);
             const uint8_t ringAlpha = (uint8_t)(juce::jlimit(0.0f, 1.0f,
-                                         (x * 0.7f + mix * 0.3f) * (1.0f - t * 0.4f)) * 40.0f);
+                                         (x * 0.7f + mix * 0.3f) * (1.0f - t * 0.4f)) * 16.0f);
 
             if (ringAlpha < 2) continue;
 
@@ -92,10 +95,11 @@ public:
         }
 
         // ── Central pulse dot ─────────────────────────────────────────────────
+        // dotAlpha reduced 60%: 180 * 0.4 = 72
         const float pulse     = 0.5f + 0.5f * std::sin(animPhase * 2.0f);
         const float dotRadius = (4.0f + x * 8.0f) * (0.7f + 0.3f * pulse);
         const uint8_t dotAlpha = (uint8_t)(juce::jlimit(0.0f, 1.0f,
-                                              x * 0.6f + mix * 0.4f) * 180.0f);
+                                              x * 0.6f + mix * 0.4f) * 72.0f);
         if (dotAlpha > 0)
         {
             // Outer glow
@@ -112,15 +116,19 @@ public:
 private:
     void timerCallback() override
     {
-        animPhase += 0.04f;
+        // Animation speed driven by pitch: faster when far from PRESENT
+        const float pp = pitchParam.load(std::memory_order_relaxed);
+        const float animSpeed = 0.04f + std::abs(pp) * 0.06f;
+        animPhase += animSpeed;
         if (animPhase > juce::MathConstants<float>::twoPi * 100.0f)
             animPhase -= juce::MathConstants<float>::twoPi * 100.0f;
         repaint();
     }
 
-    std::atomic<float> xParam   { 0.0f };
-    std::atomic<float> zParam   { 0.0f };
-    std::atomic<float> mixParam { 0.5f };
+    std::atomic<float> xParam     { 0.0f };
+    std::atomic<float> zParam     { 0.0f };
+    std::atomic<float> mixParam   { 0.5f };
+    std::atomic<float> pitchParam { 0.0f };
     float animPhase = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WarpFieldVisualizer)

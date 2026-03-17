@@ -46,9 +46,6 @@ juce_add_plugin(ALCUBIERRE
 
 juce_generate_juce_header(ALCUBIERRE)
 
-juce_add_binary_data(AlcubiereResources
-    SOURCES Resources/alcubierre_bg.png
-)
 
 target_sources(ALCUBIERRE PRIVATE
     Source/PluginProcessor.cpp
@@ -67,7 +64,6 @@ target_compile_definitions(ALCUBIERRE PUBLIC
 
 target_link_libraries(ALCUBIERRE
     PRIVATE
-        AlcubiereResources
         juce::juce_audio_utils
         juce::juce_audio_processors
         juce::juce_dsp

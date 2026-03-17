@@ -254,7 +254,6 @@ void AlcubierreProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     feedbackSmoothed.setTargetValue(apvts.getRawParameterValue("feedback")->load());
     deltaSmoothed   .setTargetValue(apvts.getRawParameterValue("delta")->load());
 
-    const float timePrev  = timeSmoothed.getCurrentValue();
     const float timePos   = timeSmoothed.skip(numSamples);
     const float y         = ySmoothed.skip(numSamples);
     const float z         = zSmoothed.skip(numSamples);
@@ -269,13 +268,14 @@ void AlcubierreProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     const float temporalDisplacement = juce::jmax(0.0f, -timePos) * 10.0f * (float)currentSampleRate;
     const float futureBlend          = juce::jmax(0.0f,  timePos);
 
-    // ── Vinyl / Doppler pitch modulation ──────────────────────────────────────
-    // Rate of change of time_position per block → pitch shift
-    // Moving toward past (delta < 0): pitch down; toward future: pitch up
-    const float timeDelta = timePos - timePrev;  // change over this block
-    const float vinylTarget = juce::jlimit(0.25f, 3.0f, 1.0f + timeDelta * 1.0f);
-    vinylPitchSmoothed.setTargetValue(vinylTarget);
-    const float vinylPitch = vinylPitchSmoothed.skip(numSamples);
+    // ── Tape-speed model: TIME position directly sets playback rate ───────────
+    // timePos = -1 → playRate ≈ 0.354 (slow, ~1.5 octaves down)
+    // timePos =  0 → playRate = 1.0  (normal speed / present)
+    // timePos = +1 → playRate ≈ 2.83 (fast, ~1.5 octaves up)
+    constexpr float PITCH_OCTAVES = 1.5f;
+    const float tapePlayRate = std::pow(2.0f, timePos * PITCH_OCTAVES);
+    vinylPitchSmoothed.setTargetValue(tapePlayRate);
+    const float smoothedTapeRate = vinylPitchSmoothed.skip(numSamples);
 
     // ── Measure dry RMS (100ms exponential window) ────────────────────────────
     float dryRmsSq = 0.0f;
@@ -329,7 +329,7 @@ void AlcubierreProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         granularEngine.processBlock(wetOut, ringBuffer,
                                      futurePtrs.data(), FUTURE_BUFFER_LENGTH,
                                      temporalDisplacement, y, z,
-                                     futureBlend, grainSizeMs, vinylPitch);
+                                     futureBlend, grainSizeMs, smoothedTapeRate);
 
         // ── Glitch engine ──────────────────────────────────────────────────────
         glitchEngine.process(wetOut, z);
